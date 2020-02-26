@@ -25,9 +25,10 @@ from pandas.tseries.offsets import MonthEnd
 from crsp_sf import *
 from post_event_nan import *
 
+
 # %% Local Functions
 
-def calculate_cumulative_returns(mdata, tt, min_periods): # TODO: to be completed
+def calculate_cumulative_returns(mdata, tt, min_periods):  # TODO: to be completed
     """
     Calculate past returns for momentum strategy
 
@@ -42,28 +43,31 @@ def calculate_cumulative_returns(mdata, tt, min_periods): # TODO: to be complete
     """
     start_time = time.time()
 
-    required_cols = ['retadj','ret']
+    required_cols = ['retadj', 'ret']
 
     assert set(required_cols).issubset(mdata.columns), "Required columns: {}.".format(', '.join(required_cols))
 
     df = mdata[required_cols].copy()
-    df['retadj'] = df['retadj']+1
+    df['retadj'] = df['retadj'] + 1
     df['ret'] = df['ret'].notnull()
 
     df.reset_index(level=0, inplace=True)
     df.reset_index(inplace=True)
-    
+
     # Cumulative Return (adjusted) in 11 months
-    df_out = (df.set_index('permno', append=True)
-            .assign(cumreturn=df.groupby('permno')['retadj'].rolling(tt,min_periods=min_periods)
-            .apply(lambda x: np.prod(x)-1).swaplevel(0,1))
-            .reset_index(1))
-     
-    df_out['cret'] =df_out.groupby('permno').cumreturn.shift(1)  # You should calculate the cumulative returns.
-    df_out.set_index(['permno', 'date'], inplace=True)
+    #here, we calculate a cumulative for past months, rolling helps us do it for every window
+    cumulative_rtn = (df.set_index('permno', append=True)
+              .assign(cumreturn=df.groupby('permno')['retadj'].rolling(tt, min_periods=min_periods)
+                      .apply(lambda x: np.prod(x) - 1).swaplevel(0, 1))
+              .reset_index(1))
+    #after we get the result, we need to transfer the numerical index into date+permno, to make sure
+    #we can concat the original data with our result
+    cumulative_rtn.set_index(['date','permno'], inplace=True)
+    cret = cumulative_rtn.groupby('permno').cumreturn.shift(1)  # You should calculate the cumulative returns.
+    #the "shift" attribute helps us to skip one most recent month to avoid the momentum reverse
     print("Time to calculate %d months past returns: %s seconds" % (tt, str(round(time.time() - start_time, 2))))
 
-    return df_out[['cret']]
+    return cret
 
 
 def calculate_melag(mdata):
@@ -123,17 +127,16 @@ def calculate_melag(mdata):
 # %% Main Function
 
 def main(save_out=True):
-
     # %% Set Up
-    db = wrds.Connection(wrds_username='jj3052')  # make sure to configure wrds connector before hand.
-    DATAPATH = r"C:\Spring2020\Big Data in Finance\liramota_hw2\download" # where to save output?
+    db = wrds.Connection(wrds_username='congxiao')  # make sure to configure wrds connector before hand.
+    DATAPATH = "C:\\1notes\\Spring 2020\\Big data\\Part2HW\\HW2"  # where to save output?
 
     start_time = time.time()
 
     # %% Download CRSP data
     varlist = ['dlret', 'dlretx', 'exchcd', 'naics', 'permco', 'prc', 'ret', 'shrcd', 'shrout', 'siccd', 'ticker']
 
-    start_date = '2000-01-01' # '1970-01-01'
+    start_date = '2000-01-01'  # '1970-01-01'
     end_date = datetime.date.today().strftime("%Y-%m-%d")
     freq = 'monthly'  # 'daily'
     permno_list = None  # [10001, 14593, 10107] #
@@ -216,7 +219,7 @@ def main(save_out=True):
     crspm['lag_dlret'] = crspm.groupby('permno').dlret.shift(1)
 
     crspm.sort_values(['permno', 'date'], inplace=True)
-    crspm.set_index([ 'permno','date'], inplace=True)
+    crspm.set_index(['date', 'permno'], inplace=True)
     crspm['melag'] = calculate_melag(crspm)
 
     # Delete rows that were not in the original data set
@@ -224,7 +227,7 @@ def main(save_out=True):
     crspm.drop(columns=['edate'], inplace=True)
 
     # TODO: Calculate past 11, 1 returns
-    crspm['ret_11_1']=calculate_cumulative_returns(crspm, 11, 6)
+    crspm['ret_11_1'] = calculate_cumulative_returns(crspm, 11, 11)
     print("Time to create CRSP monthly: %s seconds" % str(time.time() - start_time))
 
     # Rankyear
@@ -235,15 +238,13 @@ def main(save_out=True):
     crspm.loc[crspm.date.dt.month <= 6, 'rankyear'] = crspm.loc[crspm.date.dt.month <= 6, 'rankyear'] - 1
 
     if save_out:
-        crspm.to_pickle(DATAPATH+'stock_monthly.pkl')
+        crspm.to_pickle(DATAPATH + 'stock_monthly.pkl')
         print("Successfully saved stock_monthly.")
     return crspm
-
 
 # %% Main
 if __name__ == '__main__':
     main()
-
 
 
 
